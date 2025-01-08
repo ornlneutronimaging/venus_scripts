@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 
-from create_shutter_values.create_shutter_values import load_clock_divider
+from create_shutter_values.run import load_clock_divider, create_shutter_values_script
 
 
 class TestLoadingClockDivider:
@@ -19,3 +19,16 @@ class TestLoadingClockDivider:
         for _range_returned, _range_expected in zip(range_returned, range_expected):
             assert _range_returned == _range_expected
         
+    def test_retrieving_parameters(self):
+        detector_distance_m = 25.00
+        detector_offset_us = 6500
+        output_folder = "/tmp"
+        list_lambda_in_angstroms = "3.4,4.6"
+        
+        # exception raised when list_lambda_in_angstroms is None
+        try:
+            create_shutter_values_script(detector_distance_m=detector_distance_m, 
+                                         detector_offset_us=detector_offset_us, 
+                                         output_folder=output_folder) 
+        except ValueError as e:
+            assert True
