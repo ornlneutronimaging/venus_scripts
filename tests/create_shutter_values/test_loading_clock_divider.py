@@ -2,6 +2,7 @@ import pytest
 import numpy as np
 
 from create_shutter_values.run import load_clock_divider, create_shutter_values_script
+from create_shutter_values.run import format_list_lambda
 
 
 class TestLoadingClockDivider:
@@ -32,3 +33,13 @@ class TestLoadingClockDivider:
                                          output_folder=output_folder) 
         except ValueError as e:
             assert True
+
+    def test_format_list_lambda(self):
+
+        list_lambda_in_angstroms = "3. 4, 4 . 6"
+
+        clean_list_lambda_expected = [3.4, 4.6]
+        clean_list_lambda_returned = format_list_lambda(list_lambda_in_angstroms)
+
+        for _clean_list_lambda_returned, _clean_list_lambda_expected in zip(clean_list_lambda_returned, clean_list_lambda_expected):
+            assert _clean_list_lambda_returned == _clean_list_lambda_expected
