@@ -7,3 +7,5 @@ default_detector_distance_m = 25.00
 default_detector_offset_us = 6500
 default_shutter_file_output_folder = "/tmp"
 default_beam_frequency_hz = 60
+
+H_OVER_MN = (6.62607004e-34 / 1.674927471e-27) * 1e6
