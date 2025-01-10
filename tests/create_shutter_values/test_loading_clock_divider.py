@@ -1,8 +1,7 @@
-import pytest
 import numpy as np
 
-from create_shutter_values.run import load_clock_divider, create_shutter_values_script
-from create_shutter_values.run import format_list_lambda
+from create_shutter_values.create_shutter_values_file import load_clock_divider, create_shutter_values_script
+from create_shutter_values.create_shutter_values_file import format_list_lambda
 
 
 class TestLoadingClockDivider:
@@ -24,7 +23,6 @@ class TestLoadingClockDivider:
         detector_distance_m = 25.00
         detector_offset_us = 6500
         output_folder = "/tmp"
-        list_lambda_in_angstroms = "3.4,4.6"
         
         # exception raised when list_lambda_in_angstroms is None
         try:
