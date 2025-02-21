@@ -18,10 +18,10 @@ from create_shutter_values import H_OVER_MN
 # ===============
 
 # with 30Hz, 6 ranges, with 60Hz, only 3
-# starting lambda must be at least 0.3A from first hkl requested
+# starting lambda must be at least 0.3A (MINIMUM_LAMBDA_INTERVAL) from first hkl requested
 
 # format of output file
-# starting time, ending time, clock divider value, 10.24 (image bin, for now, we fix that value)
+# starting time, ending time, clock divider value, 10.24 (image bin, for now this value is fixed)
 
 from create_shutter_values import (clock_divider_file, default_detector_distance_m, default_detector_offset_us, 
                                    default_shutter_file_output_folder, default_beam_frequency_hz)
@@ -41,7 +41,6 @@ def convert_lambda_to_tof(list_lambda_in_angstroms, detector_distance_m, detecto
     list_tof_in_microseconds = [_tof + detector_offset_us for _tof in list_tof_in_microseconds]
     
     return list_tof_in_microseconds
-
 
 def create_shutter_values_script(detector_distance_m=default_detector_distance_m, 
                                  detector_offset_us=default_detector_offset_us, 
@@ -64,7 +63,7 @@ def create_shutter_values_script(detector_distance_m=default_detector_distance_m
     print(f"* {output_folder = }")
     print("=====================================")
 
-    
+    number_of_ranges = 3 if beam_frequency_hz == 60 else 6
 
 
 
