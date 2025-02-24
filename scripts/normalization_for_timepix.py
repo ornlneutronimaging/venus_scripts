@@ -32,6 +32,11 @@ class MasterDictKeys:
     data_path = "data_path"
     
 
+class StatusMetadata:
+    all_frame_number_found = True
+    all_proton_charge_found = True
+
+
 def _worker(fl):
     return (imread(fl).astype(LOAD_DTYPE)).swapaxes(0,1)
 
@@ -80,6 +85,7 @@ def retrieve_root_nexus_full_path(sample_folder):
     return f"/{facility}/{instrument}/{ipts}/nexus/"
 
 def update_dict_with_frame_number(master_dict):
+    status_all_frame_number_found = True
     for _run_number in master_dict.keys():
         _nexus_path = master_dict[_run_number][MasterDictKeys.nexus_path]
         try:
@@ -87,8 +93,9 @@ def update_dict_with_frame_number(master_dict):
                 frame_number = hdf5_data['entry']['DASlogs']['BL10:Det:PIXELMAN:ACQ:NUM']['value'][:][-1]
         except KeyError:
             frame_number = None
+            status_all_frame_number_found = False
         master_dict[_run_number][MasterDictKeys.frame_number] = frame_number
-    return master_dict
+    return master_dict, status_all_frame_number_found
 
 def update_dict_with_proton_charge(master_dict):
     for _run_number in master_dict.keys():
@@ -98,8 +105,9 @@ def update_dict_with_proton_charge(master_dict):
                 proton_charge = hdf5_data['entry'][MasterDictKeys.proton_charge][0] / 1e12
         except KeyError:
             proton_charge = None
+            status_all_proton_charge_found = False
         master_dict[_run_number][MasterDictKeys.proton_charge] = proton_charge        
-    return master_dict
+    return master_dict, status_all_proton_charge_found
     
 def update_dict_with_list_of_images(master_dict):
     for _run_number in master_dict.keys():
@@ -125,7 +133,7 @@ def update_dict_with_data_full_path(data_root_path, master_dict):
     return master_dict
 
 
-def create_master_dict(list_run_numbers=None, data_type="sample", data_root_path=None):
+def create_master_dict(list_run_numbers=None, data_type="sample", data_root_path=None, status_metadata=None):
     logging.info(f"Create {data_type} master dict of runs: {list_run_numbers = }")
 
     # retrieve metadata for each run number
@@ -138,26 +146,45 @@ def create_master_dict(list_run_numbers=None, data_type="sample", data_root_path
     master_dict = update_dict_with_nexus_full_path(nexus_root_path, master_dict)
 
     logging.info(f"updating with frame number!")
-    master_dict = update_dict_with_frame_number(master_dict)
+    master_dict, all_frame_number_found = update_dict_with_frame_number(master_dict)
+    if not status_metadata.all_frame_number_found:
+        status_metadata.all_frame_number_found = False
     logging.info(f"{master_dict = }")
 
     logging.info(f"updating with proton charge!")
-    master_dict = update_dict_with_proton_charge(master_dict)
+    master_dict, all_proton_charge_found = update_dict_with_proton_charge(master_dict)
+    if not all_proton_charge_found:
+        status_metadata.all_proton_charge_found = False
+    logging.info(f"{master_dict = }")
 
     logging.info(f"updating with list of images!")
     master_dict = update_dict_with_list_of_images(master_dict)
 
-    return master_dict
+    return master_dict, status_metadata
 
 
-def combine_ob_images(ob_master_dict):
-    logging.info(f"Combining all open beam images and correcting by proton charge ...")
+def combine_ob_images(ob_master_dict, ob_status_metadata):
+    logging.info(f"Combining all open beam images and correcting by proton charge and frame number ...")
     full_ob_data_corrected = []
 
     for _ob_run_number in ob_master_dict.keys():
+        logging.info(f"Combining ob# {_ob_run_number} ...")
         ob_data = ob_master_dict[_ob_run_number][MasterDictKeys.data]
-        proton_charge = ob_master_dict[_ob_run_number][MasterDictKeys.proton_charge]
-        logging.info(f"{_ob_run_number} -> {proton_charge = }")
+
+
+
+
+
+
+
+        if status_metadata.all_proton_charge_found:
+            proton_charge = ob_master_dict[_ob_run_number][MasterDictKeys.proton_charge]
+            logging.info(f"\t -> {proton_charge = }")
+        frame_number = ob_master_dict[_ob_run_number][MasterDictKeys.frame_number]
+        logging.info(f"\t -> {frame_number = }")
+
+
+
         full_ob_data_corrected.append(ob_data / proton_charge)
 
     ob_data_combined = np.array(full_ob_data_corrected).mean(axis=0)
@@ -200,8 +227,15 @@ if __name__ == '__main__':
     list_ob_run_numbers = get_list_run_number(ob_folder)
     logging.info(f"{list_ob_run_numbers = }")
 
-    sample_master_dict = create_master_dict(list_run_numbers=list_sample_run_numbers, data_type='sample', data_root_path=sample_folder)
-    ob_master_dict = create_master_dict(list_run_numbers=list_ob_run_numbers, data_type='ob', data_root_path=ob_folder)
+    status_metadata = StatusMetadata
+    sample_master_dict, status_metadata = create_master_dict(list_run_numbers=list_sample_run_numbers, 
+                                                             data_type='sample', 
+                                                             data_root_path=sample_folder, 
+                                                             status_metadata=status_metadata)
+    ob_master_dict, status_metadata = create_master_dict(list_run_numbers=list_ob_run_numbers, 
+                                                         data_type='ob', 
+                                                         data_root_path=ob_folder,
+                                                         status_metadata=status_metadata)
 
     # load ob images
     for _ob_run_number in ob_master_dict.keys():
@@ -211,12 +245,11 @@ if __name__ == '__main__':
         logging.info(f"{ob_master_dict[_ob_run_number][MasterDictKeys.data].shape = }")
 
     # combine all ob images
-    ob_data_combined = combine_ob_images(ob_master_dict)
+    ob_data_combined = combine_ob_images(ob_master_dict, status_metadata)
     logging.info(f"{ob_data_combined.shape = }")
 
-
-    # for _sample_run_number in list_sample_run_numbers:
-    #     logging.info(f"{_sample_run_number = }")
+    for _sample_run_number in list_sample_run_numbers:
+        logging.info(f"normalization of {_sample_run_number = }")
 
     #     sample_proton_charge = sample_master_dict[_sample_run_number]["proton_charge"]
     #     logging.info(f"\t{sample_proton_charge = }")
