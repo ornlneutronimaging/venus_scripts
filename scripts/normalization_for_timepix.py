@@ -7,6 +7,7 @@ import numpy as np
 from skimage.io import imread
 import numpy as np
 import multiprocessing as mp 
+from PIL import Image
 
 LOG_PATH = "/SNS/VENUS/shared/log/"
 LOAD_DTYPE = np.uint16
@@ -57,7 +58,7 @@ def retrieve_list_of_tif(folder):
     return list_tif
 
 
-def normalization(sample_folder=None, ob_folder=None):
+def normalization(sample_folder=None, ob_folder=None, output_folder="./"):
 
     # list sample and ob run numbers
     list_sample_run_numbers = get_list_run_number(sample_folder)
@@ -114,6 +115,31 @@ def normalization(sample_folder=None, ob_folder=None):
         normalized_data[_sample_run_number] = _sample_data
 
     logging.info(f"Normalization is done!")
+
+    logging.info(f"Exporting normalized data to {output_folder} ...")
+    # make up new output folder name
+    full_output_folder = os.path.join(output_folder, os.path.basename(sample_folder) + "_normalized")
+
+    for _run_number in normalized_data.keys():
+        logging.info(f"\t -> Exporting run {_run_number} ...")
+        run_number_output_folder = os.path.join(full_output_folder, f"Run_{_run_number}_normalized")
+        os.makedirs(run_number_output_folder, exist_ok=True)
+        
+        _list_data = normalized_data[_run_number]
+        for _index, _data in enumerate(_list_data):
+            _output_file = os.path.join(run_number_output_folder, f"image{_index:04d}.tif")
+            make_tiff(data=_data, filename=_output_file)
+        logging.info(f"\t -> Exporting run {_run_number} is done!")
+
+    logging.info(f"Exporting normalized data is done!")
+
+
+def make_tiff(data=[], filename='', metadata=None):
+    new_image = Image.fromarray(np.array(data))
+    if metadata:
+        new_image.save(filename, tiffinfo=metadata)
+    else:
+        new_image.save(filename)
 
 
 def init_master_dict(list_run_numbers):
@@ -269,6 +295,8 @@ if __name__ == '__main__':
     
     parser.add_argument("--sample", type=str, nargs=1, help="Path to the folder containing the sample data")
     parser.add_argument("--ob", type=str, nargs=1, help="Path to the folder containing the open beam data")
+    parser.add_argument("--output", type=str, nargs=1, help="Path to the output folder", default="./")
+    
     args = parser.parse_args()
     logging.info(f"{args = }")
 
@@ -286,9 +314,9 @@ if __name__ == '__main__':
     else:
         logging.info(f"open beam folder {ob_folder} located!")
 
-    normalization(sample_folder=sample_folder, ob_folder=ob_folder)
+    output_folder = args.output[0]
 
-
+    normalization(sample_folder=sample_folder, ob_folder=ob_folder, output_folder=output_folder)
 
 
     # sample = /SNS/VENUS/IPTS-34808/shared/autoreduce/mcp/November17_Sample6_UA_H_Batteries_1_5_Angs_min_30Hz_5C
@@ -298,4 +326,4 @@ if __name__ == '__main__':
     
     # source /opt/anaconda/etc/profile.d/conda.sh
     # conda activate ImagingReduction
-    # > python normalization_for_timepix.py --sample /SNS/VENUS/IPTS-34808/shared/autoreduce/mcp/November17_Sample6_UA_H_Batteries_1_5_Angs_min_30Hz_5C --ob /SNS/VENUS/IPTS-34808/shared/autoreduce/mcp/November17_OB_for_UA_H_Batteries_1_5_Angs_min_30Hz_5C
+    # > python normalization_for_timepix.py --sample /SNS/VENUS/IPTS-34808/shared/autoreduce/mcp/November17_Sample6_UA_H_Batteries_1_5_Angs_min_30Hz_5C --ob /SNS/VENUS/IPTS-34808/shared/autoreduce/mcp/November17_OB_for_UA_H_Batteries_1_5_Angs_min_30Hz_5C --output_folder /SNS/VENUS/IPTS-34808/shared/processed_data/jean_test
