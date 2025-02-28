@@ -300,24 +300,44 @@ if __name__ == '__main__':
     args = parser.parse_args()
     logging.info(f"{args = }")
 
-    sample_folder = args.sample[0]
-    if not os.path.exists(sample_folder):
-        logging.info(f"sample folder {sample_folder} does not exist!")
-        raise FileNotFoundError(f"Folder {sample_folder} does not exist!")
-    else:
-        logging.info(f"sample folder {sample_folder} located!")
+    try:
+        sample_folder = args.sample[0]
+        if not os.path.exists(sample_folder):
+            logging.info(f"sample folder {sample_folder} does not exist!")
+            raise FileNotFoundError(f"Folder {sample_folder} does not exist!")
+        else:
+            logging.info(f"sample folder {sample_folder} located!")
 
-    ob_folder = args.ob[0]
-    if not os.path.exists(ob_folder):
-        logging.info(f"open beam folder {ob_folder} does not exist!")
-        raise FileNotFoundError(f"Folder {ob_folder} does not exist!")
-    else:
-        logging.info(f"open beam folder {ob_folder} located!")
+    except (TypeError, FileNotFoundError):
+        print("\n *** INPUT ERROR of sample folder! ***\n")
+        print(parser.print_help())
+        exit()
+    
+    try:
+        ob_folder = args.ob[0]
+        if not os.path.exists(ob_folder):
+            logging.info(f"open beam folder {ob_folder} does not exist!")
+            raise FileNotFoundError(f"Folder {ob_folder} does not exist!")
+        else:
+            logging.info(f"open beam folder {ob_folder} located!")
 
-    output_folder = args.output[0]
+    except (TypeError, FileNotFoundError):
+        print("\n *** INPUT ERROR of ob folder! ***\n")
+        print(parser.print_help())
+        exit()
+
+    try:
+        output_folder = args.output[0]
+    
+    except TypeError:
+        print("\n *** INPUT ERROR of output folder! ***\n")
+        print(parser.print_help())
+        exit()
 
     normalization(sample_folder=sample_folder, ob_folder=ob_folder, output_folder=output_folder)
 
+    print(f"Normalization is done! Check the log file {log_file_name} for more details!")
+    print(f"Exported data to {output_folder}!")
 
     # sample = /SNS/VENUS/IPTS-34808/shared/autoreduce/mcp/November17_Sample6_UA_H_Batteries_1_5_Angs_min_30Hz_5C
     # ob = /SNS/VENUS/IPTS-34808/shared/autoreduce/mcp/November17_OB_for_UA_H_Batteries_1_5_Angs_min_30Hz_5C
@@ -326,4 +346,4 @@ if __name__ == '__main__':
     
     # source /opt/anaconda/etc/profile.d/conda.sh
     # conda activate ImagingReduction
-    # > python normalization_for_timepix.py --sample /SNS/VENUS/IPTS-34808/shared/autoreduce/mcp/November17_Sample6_UA_H_Batteries_1_5_Angs_min_30Hz_5C --ob /SNS/VENUS/IPTS-34808/shared/autoreduce/mcp/November17_OB_for_UA_H_Batteries_1_5_Angs_min_30Hz_5C --output_folder /SNS/VENUS/IPTS-34808/shared/processed_data/jean_test
+    # > python normalization_for_timepix.py --sample /SNS/VENUS/IPTS-34808/shared/autoreduce/mcp/November17_Sample6_UA_H_Batteries_1_5_Angs_min_30Hz_5C --ob /SNS/VENUS/IPTS-34808/shared/autoreduce/mcp/November17_OB_for_UA_H_Batteries_1_5_Angs_min_30Hz_5C --output /SNS/VENUS/IPTS-34808/shared/processed_data/jean_test
