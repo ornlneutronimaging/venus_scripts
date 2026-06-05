@@ -10,6 +10,8 @@
 MARS_TOTAL=4    # licenses reserved for cg1d-analysis* (MARS)
 VENUS_TOTAL=3   # licenses reserved for bl10-analysis* (VENUS)
 JEAN_EMAIL="j35@ornl.gov"
+# Recipients for alert (-J) and test (-t) emails.
+EMAIL_RECIPIENTS="${JEAN_EMAIL} zhangy6@ornl.gov torresjr@ornl.gov"
 
 usage() {
     cat <<EOF
@@ -100,6 +102,23 @@ done <<< "$raw")
 
 BAR="========================================================================"
 
+# Look up a user's full name and email from LDAP. Prints "Full Name <email>",
+# falling back to whatever pieces are available (and "" if LDAP has nothing).
+ldap_contact() {
+    local uid="$1" cn mail
+    local out
+    out=$(ldapsearch -x -LLL "(uid=$uid)" cn mail 2>/dev/null)
+    cn=$(printf '%s\n' "$out"   | awk -F': ' '/^cn: /   { print $2; exit }')
+    mail=$(printf '%s\n' "$out" | awk -F': ' '/^mail: / { print $2; exit }')
+    if [ -n "$cn" ] && [ -n "$mail" ]; then
+        printf '%s <%s>' "$cn" "$mail"
+    elif [ -n "$cn" ]; then
+        printf '%s' "$cn"
+    elif [ -n "$mail" ]; then
+        printf '%s' "$mail"
+    fi
+}
+
 print_table() {
     local group="$1" total="$2" label="$3" pattern="$4"
     local rows count header
@@ -118,7 +137,15 @@ print_table() {
     if [ -z "$rows" ]; then
         echo "  (none)"
     else
-        echo "$rows" | awk -F'\t' '{ printf "  %-20s %-28s %-18s %s\n", $1, $2, $3, $4 }'
+        while IFS=$'\t' read -r user machine start dur _ _; do
+            [ -z "$user" ] && continue
+            printf "  %-20s %-28s %-18s %s\n" "$user" "$machine" "$start" "$dur"
+            local contact
+            contact=$(ldap_contact "$user")
+            if [ -n "$contact" ]; then
+                printf "  %-20s %s\n" "" "$contact"
+            fi
+        done <<< "$rows"
     fi
 }
 
@@ -132,12 +159,20 @@ render_report() {
     echo "$BAR"
     local multi
     multi=$(echo "$enriched" \
-        | awk -F'\t' '{ count[$1]++ } END { for (u in count) if (count[u] > 1) printf "  %-20s %d licenses\n", u, count[u] }' \
+        | awk -F'\t' '{ count[$1]++ } END { for (u in count) if (count[u] > 1) printf "%s\t%d\n", u, count[u] }' \
         | sort)
     if [ -z "$multi" ]; then
         echo "  (none)"
     else
-        echo "$multi"
+        while IFS=$'\t' read -r u n; do
+            [ -z "$u" ] && continue
+            local contact
+            contact=$(ldap_contact "$u")
+            printf "  %-20s %d licenses\n" "$u" "$n"
+            if [ -n "$contact" ]; then
+                printf "  %-20s %s\n" "" "$contact"
+            fi
+        done <<< "$multi"
     fi
 
     echo
@@ -171,14 +206,14 @@ if [ "$notify_jean" -eq 1 ] && [ ${#triggers[@]} -gt 0 ]; then
         for t in "${triggers[@]}"; do echo "  - $t"; done
         echo
         echo "$report"
-    } | mail -s "$subject" "$JEAN_EMAIL"
+    } | mail -s "$subject" $EMAIL_RECIPIENTS
     echo
-    echo "Alert email sent to $JEAN_EMAIL (${#triggers[@]} trigger(s): ${trigger_summary})."
+    echo "Alert email sent to $EMAIL_RECIPIENTS (${#triggers[@]} trigger(s): ${trigger_summary})."
 fi
 
 if [ "$test_mode" -eq 1 ]; then
     subject="[AMIRA] test report — $(date '+%Y-%m-%d %H:%M')"
-    echo "$report" | mail -s "$subject" "$JEAN_EMAIL"
+    echo "$report" | mail -s "$subject" $EMAIL_RECIPIENTS
     echo
-    echo "Test report emailed to $JEAN_EMAIL."
+    echo "Test report emailed to $EMAIL_RECIPIENTS."
 fi
