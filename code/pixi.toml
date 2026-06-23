@@ -1,0 +1,37 @@
+[workspace]
+name = "automate-mcp-correction"
+description = "Environment to run automate_mcp_correction.py (MCP TimePix detector correction batch driver)"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tasks]
+# Print usage for the batch driver
+help = "python automate_mcp_correction.py --help"
+# Run the batch reducer, e.g. pixi run reduce IPTS-33699 my_folder_name
+reduce = "python automate_mcp_correction.py"
+
+[dependencies]
+# NeutronImagingScripts/setup.py uses the 'rU' file mode, removed in Python
+# 3.11, so the editable install below requires 3.10 or older.
+python = "3.10.*"
+numpy = "*"
+pandas = "*"
+scipy = "*"
+astropy = "*"
+pillow = "*"
+docopt = "*"
+matplotlib = "*"
+tqdm = "*"
+ipympl = "*"
+# Undeclared runtime dependency of NeuNorm's loader module.
+h5py = "*"
+pip = "*"
+
+[pypi-dependencies]
+# NeuNorm declares a dependency on the obsolete `pathlib` backport which would
+# shadow the stdlib on Python 3; install it without deps since all real deps
+# are provided above via conda-forge.
+NeuNorm = { version = "*" }
+# Installs the `neutronimaging` package and puts mcp_detector_correction.py on
+# PATH, which automate_mcp_correction.py shells out to.
+neutronimaging = { path = "../../NeutronImagingScripts", editable = true }

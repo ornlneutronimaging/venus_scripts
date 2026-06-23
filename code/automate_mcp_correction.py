@@ -61,14 +61,39 @@ def that_run_has_already_been_reduced(run_number_full_path, output_folder):
         return False, output_folder_name
     
 
-def run(ipts_folder, folder_title):
+def run(input_folder, using_tpx_sub_folder=False, verbose=False):
 
-    input_folder = f"/SNS/VENUS/{ipts_folder}/images/mcp/{folder_title}"
-    root_output_folder = f"/SNS/VENUS/{ipts_folder}/shared/autoreduce/mcp"
+    input_folder = input_folder.rstrip("/")
+    folder_title = os.path.basename(input_folder)
+    # the input path is always '/SNS/<instrument>/<ipts>/....'
+    parts = Path(input_folder).parts
+    instrument = parts[2]
+    ipts_folder = parts[3]
+    root_output_folder = f"/SNS/{instrument}/{ipts_folder}/shared/autoreduce/mcp"
     output_folder = f"{root_output_folder}/{folder_title}"
 
-    list_folder = glob.glob(os.path.join(input_folder, "Run_*"))
+    def vprint(msg):
+        logging.info(msg)
+        if verbose:
+            print(f"[verbose] {msg}")
+
+    vprint(f"instrument    = {instrument}")
+    vprint(f"ipts          = {ipts_folder}")
+    vprint(f"input_folder  = {input_folder}")
+    vprint(f"output_folder = {output_folder}")
+    if not os.path.exists(input_folder):
+        print(f"WARNING: input folder does NOT exist: {input_folder}")
+        logging.warning(f"input folder does NOT exist: {input_folder}")
+
+    glob_pattern = os.path.join(input_folder, "*Run_*")
+    list_folder = glob.glob(glob_pattern)
     list_folder.sort()
+    vprint(f"glob pattern  = {glob_pattern}")
+    vprint(f"found {len(list_folder)} run folder(s) to consider")
+    if not list_folder:
+        print(f"WARNING: no '*Run_*' folders matched {glob_pattern} - nothing to do.")
+        logging.warning(f"no '*Run_*' folders matched {glob_pattern}")
+        return
 
     nbr_runs_already_reduced = 0
     nbr_new_runs_reduced = 0
@@ -87,26 +112,33 @@ def run(ipts_folder, folder_title):
             nbr_runs_already_reduced += 1
             continue
    
-        _input_folder = os.path.join(_input_folder, 'tpx')
+        if using_tpx_sub_folder:
+            _input_folder = os.path.join(_input_folder, 'tpx')
 
         full_output_folder = os.path.join(output_folder, run_number)
         if not os.path.exists(full_output_folder):
             os.makedirs(full_output_folder)
 
         full_cmd = f"{cmd} {_input_folder} {full_output_folder}"
-        print(f"{full_cmd =}")
+        vprint(f"full_cmd = {full_cmd}")
         print(f"working with {run_number} ....", end="")
         logging.info(f"working with {run_number}:")
         proc = subprocess.Popen(full_cmd,
                                 shell=True,
                                 stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE,
                                 universal_newlines=True,
                                 cwd=full_output_folder)
         out, err = proc.communicate()
+        vprint(f"return code = {proc.returncode}")
+        if out:
+            vprint(f"stdout:\n{out}")
         if err:
+            vprint(f"stderr:\n{err}")
+        if proc.returncode != 0:
             logging.info(f"FAILED!")
-            print(f" FAILED! (check log file at /SNS/VENUS/shared/log/{file_name})")
+            print(f" FAILED! (check log file at /SNS/VENUS/shared/log/{file_name}.log)")
             logging.info(f"{err}")
         else:
             print(f" done!")
@@ -121,16 +153,21 @@ def run(ipts_folder, folder_title):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Reduce all the runs from the given source folder",
-                                     epilog="Example: python automate_mcp_correction <folder base name only (not full path)>\npython automate_mcp_correction /SNS/VENUS/IPTS-3333/images/mcp/all_those_folders*")
-    parser.add_argument('ipts', type=str, help='IPTS (IPTS-1234)')
-    parser.add_argument('folder', type=str, nargs='*', help='full path to folder containing runs to reduce (MCP TimePix detector only)')
+                                     epilog="Example: python automate_mcp_correction /SNS/VENUS/IPTS-3333/images/mcp/all_those_folders*")
+    parser.add_argument('folder', type=str, nargs='*', help='full path to folder(s) containing the Run_* runs to reduce (MCP TimePix detector only); the IPTS/instrument are derived from this /SNS/<instrument>/<ipts>/... path')
+    parser.add_argument('--using_tpx_sub_folder', action='store_true', help="look for the runs inside a 'tpx' sub-folder of each Run_* folder (default: False)")
+    parser.add_argument('-v', '--verbose', action='store_true', help='print verbose diagnostics (resolved paths, glob results, subprocess output)')
     args = parser.parse_args()
 
+    if args.verbose:
+        # also echo log messages to the console
+        logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+
     list_folder_name = args.folder
-    ipts_folder_name = args.ipts
+    if not list_folder_name:
+        print("WARNING: no folder argument provided - nothing to do.")
     for _folder_name in list_folder_name:
 
-        short_folder_name = str(Path(_folder_name).name)
-        print(f"Running reduction on folder: {short_folder_name} from {ipts_folder_name}")      
-        logging.info(f"Running reduction on folder: {short_folder_name} from {ipts_folder_name}")      
-        run(ipts_folder_name, short_folder_name)
+        print(f"Running reduction on folder: {_folder_name}")
+        logging.info(f"Running reduction on folder: {_folder_name}")
+        run(_folder_name, using_tpx_sub_folder=args.using_tpx_sub_folder, verbose=args.verbose)
