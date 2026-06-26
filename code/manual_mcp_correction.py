@@ -39,36 +39,27 @@ def looks_like_run_folder(name):
 
 def that_run_has_already_been_reduced(run_number_full_path, output_folder):
     """
-    this checks if any tiff are found in the output folder (created using the input path)
+    this checks if any tiff are found in the output folder (output_folder/<run>)
     if they do, just return True and None
     if they don't, return False and the full path to that output folder
-    if output folder does not exists, create it !
     """
     logging.info(f"\tChecking if that run has already been reduced:")
     run_number = os.path.basename(run_number_full_path)
     logging.info(f"\t\t{run_number =}")
-    folder_name = os.path.basename(os.path.dirname(run_number_full_path))
-    logging.info(f"\t\t{folder_name =}")
-    output_folder_name = os.path.join(output_folder, folder_name)
-    if os.path.exists(output_folder_name):
-        logging.info(f"\t\t{output_folder_name} does exist already - checking now that the run is there as well!")
-        output_run_full_path = os.path.join(output_folder_name, run_number)
-        logging.info(f"\t\t{output_run_full_path} exists?")
-        if os.path.exists(output_run_full_path):
-            # check that there are many tiff files there
-            list_tiff_files = glob.glob(os.path.join(output_run_full_path, "*.tif*"))
-            if len(list_tiff_files) > 1:
-                logging.info(f"\t\tFound many tif files in that folder, it has already been reduced with success!")
-                return True, None
-            else:
-                logging.info(f"\t\tFolder does not contain any tif files, we need to reduce that run!")
-                return False, output_folder_name
+    output_run_full_path = os.path.join(output_folder, run_number)
+    logging.info(f"\t\t{output_run_full_path} exists?")
+    if os.path.exists(output_run_full_path):
+        # check that there are many tiff files there
+        list_tiff_files = glob.glob(os.path.join(output_run_full_path, "*.tif*"))
+        if len(list_tiff_files) > 1:
+            logging.info(f"\t\tFound many tif files in that folder, it has already been reduced with success!")
+            return True, None
         else:
-            logging.info(f"{output_run_full_path} not found!")
-            return False, output_folder_name
+            logging.info(f"\t\tFolder does not contain any tif files, we need to reduce that run!")
+            return False, output_folder
     else:
-        logging.info(f"{output_folder_name} not Found!")
-        return False, output_folder_name
+        logging.info(f"{output_run_full_path} not found!")
+        return False, output_folder
     
 
 def run(input_folder, output_folder_base=None, using_tpx_sub_folder=False, verbose=False):
@@ -112,19 +103,27 @@ def run(input_folder, output_folder_base=None, using_tpx_sub_folder=False, verbo
         # the provided folder is itself a run -> use it directly
         vprint(f"the selected folder '{folder_title}' is a run itself - using it directly")
         list_folder = [input_folder]
-        # output layout stays root/<set>/<run>, where the set is the run's parent folder
-        output_folder = f"{root_output_folder}/{os.path.basename(os.path.dirname(input_folder))}"
+        # the set is the run's parent folder
+        set_name = os.path.basename(os.path.dirname(input_folder))
     else:
         # the provided folder is a set -> use the run folders inside it ('Run_*' or '*_run*')
         list_folder = [f for f in glob.glob(os.path.join(input_folder, "*"))
                        if os.path.isdir(f) and looks_like_run_folder(os.path.basename(f))]
         list_folder.sort()
-        output_folder = f"{root_output_folder}/{folder_title}"
+        set_name = folder_title
         vprint(f"found {len(list_folder)} run folder(s) to consider in {input_folder}")
         if not list_folder:
             print(f"WARNING: no run folders ('Run_*' or '*_run*') found in {input_folder} - nothing to do.")
             logging.warning(f"no run folders ('Run_*' or '*_run*') found in {input_folder}")
             return
+
+    if output_folder_base:
+        # a custom output location was given -> write runs directly under it,
+        # without inserting the '<set>' grouping folder
+        output_folder = root_output_folder
+    else:
+        # default layout groups the runs by set: root/<set>/<run>
+        output_folder = f"{root_output_folder}/{set_name}"
 
     vprint(f"output_folder = {output_folder}")
 
@@ -143,7 +142,7 @@ def run(input_folder, output_folder_base=None, using_tpx_sub_folder=False, verbo
         run_number = os.path.basename(_input_folder)
         print(f"Working with run {run_number} ...", end="")
         
-        _state, _ = that_run_has_already_been_reduced(_input_folder, root_output_folder)
+        _state, _ = that_run_has_already_been_reduced(_input_folder, output_folder)
 
         if _state:
             logging.info(f"\t\tAlready been reduced!")
