@@ -1,4 +1,5 @@
 import sys, os
+import re
 import subprocess
 import glob
 import logging
@@ -19,6 +20,15 @@ logging.basicConfig(filename=log_file_name,
 logging.info(f"*** Starting a new script {file_name} ***")
 
 cmd = 'mcp_detector_correction.py --skipimg '
+
+# a run folder can be named either 'Run_1234' or '..._run1234' (case-insensitive);
+# both conventions have 'run' (optionally surrounded by '_') followed by the run number
+RUN_FOLDER_REGEX = re.compile(r'_?run_?\d', re.IGNORECASE)
+
+
+def looks_like_run_folder(name):
+    """True if the folder name matches a run convention ('Run_1234' or '..._run1234')."""
+    return RUN_FOLDER_REGEX.search(name) is not None
 
 # input_folder = f"/SNS/VENUS/IPTS-33699/images/mcp/{folder_title}"
 # output_folder = f"/SNS/VENUS/IPTS-33531/shared/autoreduce/mcp/"
@@ -61,45 +71,75 @@ def that_run_has_already_been_reduced(run_number_full_path, output_folder):
         return False, output_folder_name
     
 
-def run(input_folder, using_tpx_sub_folder=False, verbose=False):
-
-    input_folder = input_folder.rstrip("/")
-    folder_title = os.path.basename(input_folder)
-    # the input path is always '/SNS/<instrument>/<ipts>/....'
-    parts = Path(input_folder).parts
-    instrument = parts[2]
-    ipts_folder = parts[3]
-    root_output_folder = f"/SNS/{instrument}/{ipts_folder}/shared/autoreduce/mcp"
-    output_folder = f"{root_output_folder}/{folder_title}"
+def run(input_folder, output_folder_base=None, using_tpx_sub_folder=False, verbose=False):
 
     def vprint(msg):
         logging.info(msg)
         if verbose:
             print(f"[verbose] {msg}")
 
+    input_folder = os.path.abspath(input_folder.rstrip("/"))
+    # mcp_detector_correction.py needs a folder, not a fits image: if an image
+    # was selected, use the folder that contains it
+    if input_folder.lower().endswith((".fits", ".fit")):
+        vprint(f"'{input_folder}' is a fits image, using its parent folder instead")
+        input_folder = os.path.dirname(input_folder)
+    folder_title = os.path.basename(input_folder)
+    # the path always contains '/<instrument>/IPTS-####/....', regardless of
+    # whether it is the /SNS or the /gpfs (physical) mount
+    match = re.search(r"/([^/]+)/(IPTS-\d+)(?:/|$)", input_folder)
+    if not match:
+        print(f"ERROR: could not find an '<instrument>/IPTS-####' pattern in: {input_folder}")
+        logging.error(f"could not find an '<instrument>/IPTS-####' pattern in: {input_folder}")
+        return
+    instrument = match.group(1)
+    ipts_folder = match.group(2)
+    if output_folder_base:
+        # user-defined output location overrides the auto-derived one
+        root_output_folder = os.path.abspath(output_folder_base.rstrip("/"))
+    else:
+        root_output_folder = f"/SNS/{instrument}/{ipts_folder}/shared/autoreduce/mcp"
+
     vprint(f"instrument    = {instrument}")
     vprint(f"ipts          = {ipts_folder}")
     vprint(f"input_folder  = {input_folder}")
-    vprint(f"output_folder = {output_folder}")
+    vprint(f"output base   = {root_output_folder}")
     if not os.path.exists(input_folder):
         print(f"WARNING: input folder does NOT exist: {input_folder}")
         logging.warning(f"input folder does NOT exist: {input_folder}")
 
-    glob_pattern = os.path.join(input_folder, "*Run_*")
-    list_folder = glob.glob(glob_pattern)
-    list_folder.sort()
-    vprint(f"glob pattern  = {glob_pattern}")
-    vprint(f"found {len(list_folder)} run folder(s) to consider")
-    if not list_folder:
-        print(f"WARNING: no '*Run_*' folders matched {glob_pattern} - nothing to do.")
-        logging.warning(f"no '*Run_*' folders matched {glob_pattern}")
-        return
+    if looks_like_run_folder(folder_title):
+        # the provided folder is itself a run -> use it directly
+        vprint(f"the selected folder '{folder_title}' is a run itself - using it directly")
+        list_folder = [input_folder]
+        # output layout stays root/<set>/<run>, where the set is the run's parent folder
+        output_folder = f"{root_output_folder}/{os.path.basename(os.path.dirname(input_folder))}"
+    else:
+        # the provided folder is a set -> use the run folders inside it ('Run_*' or '*_run*')
+        list_folder = [f for f in glob.glob(os.path.join(input_folder, "*"))
+                       if os.path.isdir(f) and looks_like_run_folder(os.path.basename(f))]
+        list_folder.sort()
+        output_folder = f"{root_output_folder}/{folder_title}"
+        vprint(f"found {len(list_folder)} run folder(s) to consider in {input_folder}")
+        if not list_folder:
+            print(f"WARNING: no run folders ('Run_*' or '*_run*') found in {input_folder} - nothing to do.")
+            logging.warning(f"no run folders ('Run_*' or '*_run*') found in {input_folder}")
+            return
+
+    vprint(f"output_folder = {output_folder}")
 
     nbr_runs_already_reduced = 0
     nbr_new_runs_reduced = 0
 
     for _input_folder in list_folder:
-        
+
+        # mcp_detector_correction.py expects a folder containing the fits/txt
+        # files, not a fits image: if a fits file got selected/matched, use the
+        # folder that contains it
+        if _input_folder.lower().endswith((".fits", ".fit")):
+            vprint(f"'{_input_folder}' is a fits image, using its parent folder instead")
+            _input_folder = os.path.dirname(_input_folder)
+
         run_number = os.path.basename(_input_folder)
         print(f"Working with run {run_number} ...", end="")
         
@@ -153,10 +193,12 @@ def run(input_folder, using_tpx_sub_folder=False, verbose=False):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Reduce all the runs from the given source folder",
-                                     epilog="Example: python automate_mcp_correction /SNS/VENUS/IPTS-3333/images/mcp/all_those_folders*")
+                                     epilog="Example: python manual_mcp_correction /SNS/VENUS/IPTS-3333/images/mcp/all_those_folders*")
     parser.add_argument('folder', type=str, nargs='*', help='full path to folder(s) containing the Run_* runs to reduce (MCP TimePix detector only); the IPTS/instrument are derived from this /SNS/<instrument>/<ipts>/... path')
+    parser.add_argument('-o', '--output', type=str, default=None, help='base folder where the reduced runs are written (layout: <output>/<set>/<run>); if not provided, defaults to /SNS/<instrument>/<ipts>/shared/autoreduce/mcp')
     parser.add_argument('--using_tpx_sub_folder', action='store_true', help="look for the runs inside a 'tpx' sub-folder of each Run_* folder (default: False)")
     parser.add_argument('-v', '--verbose', action='store_true', help='print verbose diagnostics (resolved paths, glob results, subprocess output)')
+    parser.add_argument('--log', action='store_true', help='display the content of the log file once the script is done (default: False)')
     args = parser.parse_args()
 
     if args.verbose:
@@ -170,4 +212,14 @@ if __name__ == "__main__":
 
         print(f"Running reduction on folder: {_folder_name}")
         logging.info(f"Running reduction on folder: {_folder_name}")
-        run(_folder_name, using_tpx_sub_folder=args.using_tpx_sub_folder, verbose=args.verbose)
+        run(_folder_name, output_folder_base=args.output, using_tpx_sub_folder=args.using_tpx_sub_folder, verbose=args.verbose)
+
+    if args.log:
+        # flush any buffered log records before reading the file back
+        logging.shutdown()
+        print(f"\n===== Content of log file {log_file_name} =====")
+        try:
+            with open(log_file_name, 'r') as f:
+                print(f.read())
+        except OSError as e:
+            print(f"ERROR: could not read log file {log_file_name}: {e}")
