@@ -1,3 +1,96 @@
+#!/usr/bin/env bash
+#
+# fix_browser - reset browser state that commonly prevents Chromium and
+# Firefox from launching (stale Chromium singleton locks and a corrupt
+# Firefox profile directory).
+#
+# A running browser holds files open under ~/.mozilla, so the profile reset
+# below would fail with "Device or resource busy" (especially on NFS/GPFS).
+# This script refuses to run while Firefox/Chromium are alive, unless you
+# pass --force, which kills them first.
+#
+# Usage:
+#   fix_browser            reset state (fails if a browser is running)
+#   fix_browser --force    kill running browsers first, then reset
+#   fix_browser --help     show this help
+#
+set -euo pipefail
+
+force=0
+for arg in "$@"; do
+    case "$arg" in
+        -f|--force) force=1 ;;
+        -h|--help)
+            sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "fix_browser: unknown option '$arg' (try --help)" >&2
+            exit 2
+            ;;
+    esac
+done
+
+# Find this user's running Firefox/Chromium processes.
+#
+# Match by process NAME (-x against comm), not the full command line, so we
+# don't catch unrelated processes that merely mention a browser in their args
+# (e.g. "jupyter-lab --browser=firefox"). Zombies (<defunct>) are skipped:
+# they hold no files open and cannot be killed.
+browser_pids() {
+    pgrep -u "$USER" -x 'firefox.*|chrome.*|chromium.*' 2>/dev/null | while read -r p; do
+        case "$(ps -o stat= -p "$p" 2>/dev/null)" in
+            Z*|"") ;;          # zombie or already gone -> ignore
+            *) echo "$p" ;;
+        esac
+    done
+}
+
+pids="$(browser_pids)"
+if [ -n "$pids" ]; then
+    if [ "$force" -eq 0 ]; then
+        echo "Firefox/Chromium is still running, so the profile reset would fail" >&2
+        echo "with 'Device or resource busy'. Close the browser, then rerun, or use:" >&2
+        echo "    fix_browser --force" >&2
+        echo >&2
+        echo "Running browser processes:" >&2
+        # shellcheck disable=SC2086
+        ps -o pid=,args= -p $pids >&2
+        exit 1
+    fi
+
+    echo "Stopping running browsers (--force) ..."
+    # shellcheck disable=SC2086
+    kill $pids 2>/dev/null || true
+    # Give them a moment to exit cleanly, then force-kill any survivors.
+    for _ in 1 2 3 4 5; do
+        sleep 1
+        [ -z "$(browser_pids)" ] && break
+    done
+    leftover="$(browser_pids)"
+    if [ -n "$leftover" ]; then
+        # shellcheck disable=SC2086
+        kill -9 $leftover 2>/dev/null || true
+        sleep 1
+    fi
+    if [ -n "$(browser_pids)" ]; then
+        echo "Could not stop all browser processes; some are still running." >&2
+        exit 1
+    fi
+fi
+
+# Remove stale Chromium singleton lock files left behind by an unclean exit.
 rm -rf ~/.config/chromium/Singleton*
+
+# Reset the Firefox profile: discard any previous backup, then move the
+# current profile aside so Firefox recreates a fresh one on next launch.
 rm -rf ~/.mozilla.bak
-mv --force ~/.mozilla ~/.mozilla.bak
+if [ -e ~/.mozilla ]; then
+    mv --force ~/.mozilla ~/.mozilla.bak
+fi
+
+echo "Browser state reset. Restart Chromium/Firefox to apply."
+
+# Related wrappers:
+#   /usr/local/bin/firefox-wrapper.sh
+#   /usr/local/bin/chromium-browser-wrapper.sh
