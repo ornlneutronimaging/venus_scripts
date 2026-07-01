@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # list_and_fix_running_browser.sh - find (and optionally kill) the current
-# user's Firefox / Jupyter processes across the shared analysis machines.
+# user's browser / Jupyter processes across the shared analysis machines.
 #
 # Why this is needed
 # ------------------
@@ -15,34 +15,48 @@
 # holds files open and keeps the (often zombie) Firefox child around. Killing
 # the Jupyter parent both frees the profile and reaps the zombie.
 #
-# It walks a fixed list of hosts over SSH (in parallel), so it needs
-# passwordless SSH to those hosts (key in ~/.ssh/authorized_keys; on shared
-# home dirs one key covers them all).
+# It walks a list of hosts (read from list_and_fix_running_browser.cfg, a JSON
+# file next to this script) over SSH in parallel, so it needs passwordless SSH
+# to those hosts (key in ~/.ssh/authorized_keys; on shared home dirs one key
+# covers them all).
 #
 # Usage:
 #   list_and_fix_running_browser.sh            # (default) list matching procs
 #   list_and_fix_running_browser.sh list       # same as above
 #   list_and_fix_running_browser.sh kill       # kill them, then verify
+#   list_and_fix_running_browser.sh -firefox   # match only Firefox
+#   list_and_fix_running_browser.sh -chrome    # match only Chrome / Chromium
+#   list_and_fix_running_browser.sh -firefox -chrome  # both (also the default)
 #   list_and_fix_running_browser.sh list -v    # also show clean/unreachable hosts
 #   list_and_fix_running_browser.sh --help
 #
 set -uo pipefail
 
 # ---------------------------------------------------------------------------
-# Host list
+# Host / browser list (loaded from the .cfg file next to this script)
 # ---------------------------------------------------------------------------
-HOSTS=(
-    bl10-analysis1.sns.gov
-    bl10-analysis2.sns.gov
-    bl10-analysis6.sns.gov
-    cg1d-analysis1.ornl.gov
-    cg1d-analysis2.ornl.gov
-)
-# analysis.node01.sns.gov ... analysis.node30.sns.gov (some do not exist; they
-# simply show up as "unreachable" and are skipped).
-for n in $(seq -w 1 30); do
-    HOSTS+=("analysis.node${n}.sns.gov")
-done
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_FILE="${SCRIPT_DIR}/list_and_fix_running_browser.cfg"
+
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "$(basename "$0"): config file not found: $CONFIG_FILE" >&2
+    exit 1
+fi
+if ! command -v jq >/dev/null 2>&1; then
+    echo "$(basename "$0"): 'jq' is required to read $CONFIG_FILE" >&2
+    exit 1
+fi
+if ! jq -e . "$CONFIG_FILE" >/dev/null 2>&1; then
+    echo "$(basename "$0"): invalid JSON in $CONFIG_FILE" >&2
+    exit 1
+fi
+
+mapfile -t HOSTS < <(jq -r '.hosts[]?' "$CONFIG_FILE")
+
+if [[ ${#HOSTS[@]} -eq 0 ]]; then
+    echo "$(basename "$0"): no 'hosts' defined in $CONFIG_FILE" >&2
+    exit 1
+fi
 
 SSH_OPTS=(
     -o BatchMode=yes
@@ -56,13 +70,17 @@ SSH_OPTS=(
 # ---------------------------------------------------------------------------
 mode="list"
 verbose=0
+want_firefox=0
+want_chrome=0
 for arg in "$@"; do
     case "$arg" in
         list)        mode="list" ;;
         kill)        mode="kill" ;;
+        -firefox)    want_firefox=1 ;;
+        -chrome)     want_chrome=1 ;;
         -v|--verbose) verbose=1 ;;
         -h|--help)
-            sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -71,6 +89,23 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# Browser matching: -firefox and/or -chrome select which process names to look
+# for. With neither flag we default to both (the original behaviour).
+if [[ "$want_firefox" -eq 0 && "$want_chrome" -eq 0 ]]; then
+    want_firefox=1
+    want_chrome=1
+fi
+BROWSER_RE=""
+BROWSER_LABEL=""
+if [[ "$want_firefox" -eq 1 ]]; then
+    BROWSER_RE+="${BROWSER_RE:+|}firefox.*"
+    BROWSER_LABEL+="${BROWSER_LABEL:+/}Firefox"
+fi
+if [[ "$want_chrome" -eq 1 ]]; then
+    BROWSER_RE+="${BROWSER_RE:+|}chrome.*|chromium.*"
+    BROWSER_LABEL+="${BROWSER_LABEL:+/}Chrome"
+fi
 
 # ---------------------------------------------------------------------------
 # Remote payload - runs on each host via `bash -s -- <mode>`.
@@ -89,11 +124,12 @@ done
 # ---------------------------------------------------------------------------
 read -r -d '' REMOTE_SCRIPT <<'REMOTE_EOF'
 mode="${1:-list}"
+browser_re="${2:-firefox.*}"
 me="$USER"
 
 list_pids() {
     {
-        pgrep -u "$me" -x 'firefox.*|chrome.*|chromium.*' 2>/dev/null
+        pgrep -u "$me" -x "$browser_re" 2>/dev/null
         pgrep -u "$me" -f 'jupyter-[l]ab|jupyter-[n]otebook' 2>/dev/null
     } | sed '/^$/d' | sort -un
 }
@@ -149,7 +185,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 scan_host() {
     local host="$1" out rc
-    out="$(ssh "${SSH_OPTS[@]}" "$host" bash -s -- "$mode" <<<"$REMOTE_SCRIPT" 2>/dev/null)"
+    out="$(ssh "${SSH_OPTS[@]}" "$host" bash -s -- "$mode" "$BROWSER_RE" <<<"$REMOTE_SCRIPT" 2>/dev/null)"
     rc=$?
     if [ "$rc" -ne 0 ] && [ -z "$out" ]; then
         printf 'UNREACHABLE\n' >"$tmp/$host"
@@ -159,9 +195,9 @@ scan_host() {
 }
 
 if [ "$mode" = "kill" ]; then
-    echo "== Killing this user's Firefox / Jupyter processes on ${#HOSTS[@]} hosts =="
+    echo "== Killing this user's ${BROWSER_LABEL} / Jupyter processes on ${#HOSTS[@]} hosts =="
 else
-    echo "== Listing this user's Firefox / Jupyter processes on ${#HOSTS[@]} hosts =="
+    echo "== Listing this user's ${BROWSER_LABEL} / Jupyter processes on ${#HOSTS[@]} hosts =="
 fi
 echo
 
