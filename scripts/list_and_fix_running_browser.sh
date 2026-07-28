@@ -185,7 +185,10 @@ trap 'rm -rf "$tmp"' EXIT
 
 scan_host() {
     local host="$1" out rc
-    out="$(ssh "${SSH_OPTS[@]}" "$host" bash -s -- "$mode" "$BROWSER_RE" <<<"$REMOTE_SCRIPT" 2>/dev/null)"
+    # Extra single quotes keep the regex one argument on the remote side:
+    # ssh joins its args into a single command line, so an unquoted '|' in
+    # $BROWSER_RE would be parsed as a pipeline by the remote shell.
+    out="$(ssh "${SSH_OPTS[@]}" "$host" bash -s -- "$mode" "'$BROWSER_RE'" <<<"$REMOTE_SCRIPT" 2>/dev/null)"
     rc=$?
     if [ "$rc" -ne 0 ] && [ -z "$out" ]; then
         printf 'UNREACHABLE\n' >"$tmp/$host"
